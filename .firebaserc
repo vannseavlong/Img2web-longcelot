@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "longcelot-eco-system"
+  },
+  "targets": {
+    "longcelot-eco-system": {
+      "hosting": {
+        "img2webp-longcelot": ["img2webp-longcelot"]
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+backend/.venv/
+functions/venv/
+
+# Node
+node_modules/
+
+# Next.js build output
+frontend/.next/
+frontend/out/
+
+# Firebase
+.firebase/
