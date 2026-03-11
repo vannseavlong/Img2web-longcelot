@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "prepare": "cd .. && node frontend/node_modules/.bin/husky"
+    "prepare": "cd .. && node frontend/node_modules/husky/bin.js"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx,mjs}": "eslint --max-warnings 0"
