@@ -1,19 +1,14 @@
 "use client";
 
-export interface ConvertOptions {
-  quality: number;
-  doResize: boolean;
-  maxWidth: number;
-  maxHeight: number;
-}
+import type { ConvertOptions } from "@/app/types/convert";
 
-interface Props {
+interface OptionsPanelProps {
   options: ConvertOptions;
   onChange: (o: ConvertOptions) => void;
   disabled?: boolean;
 }
 
-export default function OptionsPanel({ options, onChange, disabled }: Props) {
+export default function OptionsPanel({ options, onChange, disabled }: OptionsPanelProps) {
   const set = (patch: Partial<ConvertOptions>) =>
     onChange({ ...options, ...patch });
 

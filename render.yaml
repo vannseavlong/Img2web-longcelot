@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: img2webp-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ALLOWED_ORIGIN
+        value: https://img2webp-longcelot.web.app

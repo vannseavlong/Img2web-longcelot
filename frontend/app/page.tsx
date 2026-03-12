@@ -1,72 +1,110 @@
 "use client";
 
+import JSZip from "jszip";
 import { useCallback, useRef, useState } from "react";
 import DropZone from "./components/DropZone";
 import FileList from "./components/FileList";
-import OptionsPanel, { ConvertOptions } from "./components/OptionsPanel";
+import OptionsPanel from "./components/OptionsPanel";
+import type { ConvertOptions, FileEntry, FileStatus } from "./types/convert";
 
-type Status = "idle" | "converting" | "done" | "error";
+type GlobalStatus = "idle" | "converting" | "done" | "error";
 
 export default function Home() {
-  const [files, setFiles] = useState<File[]>([]);
+  const [entries, setEntries] = useState<FileEntry[]>([]);
   const [options, setOptions] = useState<ConvertOptions>({
     quality: 80,
     doResize: false,
     maxWidth: 1920,
     maxHeight: 1080,
   });
-  const [status, setStatus] = useState<Status>("idle");
+  const [globalStatus, setGlobalStatus] = useState<GlobalStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const downloadRef = useRef<{ url: string; name: string } | null>(null);
 
   const addFiles = useCallback((incoming: File[]) => {
-    setFiles((prev) => {
-      const names = new Set(prev.map((f) => f.name));
-      return [...prev, ...incoming.filter((f) => !names.has(f.name))];
+    setEntries((prev) => {
+      const names = new Set(prev.map((e) => e.file.name));
+      const newEntries: FileEntry[] = incoming
+        .filter((f) => !names.has(f.name))
+        .map((f) => ({ file: f, status: "pending" }));
+      return [...prev, ...newEntries];
     });
-    setStatus("idle");
+    setGlobalStatus("idle");
     if (downloadRef.current) {
       URL.revokeObjectURL(downloadRef.current.url);
       downloadRef.current = null;
     }
   }, []);
 
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+  const removeFile = useCallback((index: number) => {
+    setEntries((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const updateEntryStatus = (
+    index: number,
+    patch: Partial<FileEntry>,
+  ) => {
+    setEntries((prev) =>
+      prev.map((e, i) => (i === index ? { ...e, ...patch } : e)),
+    );
   };
 
   const convert = async () => {
-    if (!files.length) return;
-    setStatus("converting");
+    if (!entries.length) return;
+
+    const snapshot = entries;
+    setEntries(snapshot.map((e) => ({ ...e, status: "pending" as FileStatus, result: undefined, error: undefined })));
+    setGlobalStatus("converting");
     setErrorMsg("");
 
-    const formData = new FormData();
-    files.forEach((f) => formData.append("files", f));
-    formData.append("quality", options.quality.toString());
-    formData.append("do_resize", options.doResize ? "true" : "false");
-    formData.append("max_width", options.maxWidth.toString());
-    formData.append("max_height", options.maxHeight.toString());
+    const results: Array<{ name: string; blob: Blob }> = [];
 
-    try {
-      const res = await fetch("/api/convert", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+    for (let i = 0; i < snapshot.length; i++) {
+      const entry = snapshot[i];
+      updateEntryStatus(i, { status: "converting" });
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const name =
-        files.length === 1
-          ? files[0].name.replace(/\.[^.]+$/, ".webp")
-          : "converted.zip";
+      const formData = new FormData();
+      formData.append("files", entry.file);
+      formData.append("quality", options.quality.toString());
+      formData.append("do_resize", options.doResize ? "true" : "false");
+      formData.append("max_width", options.maxWidth.toString());
+      formData.append("max_height", options.maxHeight.toString());
 
-      downloadRef.current = { url, name };
-      setStatus("done");
-    } catch (e) {
-      setErrorMsg(e instanceof Error ? e.message : "Conversion failed");
-      setStatus("error");
+      try {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
+        const res = await fetch(`${apiBase}/api/convert`, { method: "POST", body: formData });
+        if (!res.ok) throw new Error(`Server error ${res.status}`);
+
+        const blob = await res.blob();
+        const webpName = entry.file.name.replace(/\.[^.]+$/, ".webp");
+        results.push({ name: webpName, blob });
+        updateEntryStatus(i, { status: "done", result: blob });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Conversion failed";
+        updateEntryStatus(i, { status: "error", error: msg });
+      }
     }
+
+    if (results.length === 0) {
+      setGlobalStatus("error");
+      setErrorMsg("All conversions failed.");
+      return;
+    }
+
+    if (results.length === 1) {
+      const url = URL.createObjectURL(results[0].blob);
+      downloadRef.current = { url, name: results[0].name };
+    } else {
+      const zip = new JSZip();
+      for (const { name, blob } of results) {
+        zip.file(name, blob);
+      }
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
+      downloadRef.current = { url, name: "converted.zip" };
+    }
+
+    setGlobalStatus("done");
   };
 
   const download = () => {
@@ -82,13 +120,15 @@ export default function Home() {
       URL.revokeObjectURL(downloadRef.current.url);
       downloadRef.current = null;
     }
-    setFiles([]);
-    setStatus("idle");
+    setEntries([]);
+    setGlobalStatus("idle");
     setErrorMsg("");
   };
 
-  const busy = status === "converting";
-  const done = status === "done";
+  const busy = globalStatus === "converting";
+  const done = globalStatus === "done";
+  const successCount = entries.filter((e) => e.status === "done").length;
+  const totalCount = entries.length;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-white flex items-start justify-center pt-16 pb-16 px-4">
@@ -107,27 +147,27 @@ export default function Home() {
         <DropZone onFiles={addFiles} disabled={busy || done} />
 
         {/* File list */}
-        {files.length > 0 && (
+        {entries.length > 0 && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-xs text-zinc-500 uppercase tracking-wider">
-                {files.length} file{files.length !== 1 ? "s" : ""} selected
+                {entries.length} file{entries.length !== 1 ? "s" : ""} selected
               </span>
               {!busy && !done && (
                 <button
-                  onClick={() => setFiles([])}
+                  onClick={() => setEntries([])}
                   className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
                 >
                   Clear all
                 </button>
               )}
             </div>
-            <FileList files={files} onRemove={removeFile} disabled={busy || done} />
+            <FileList entries={entries} onRemove={removeFile} disabled={busy || done} />
           </div>
         )}
 
         {/* Options */}
-        {files.length > 0 && (
+        {entries.length > 0 && (
           <OptionsPanel
             options={options}
             onChange={setOptions}
@@ -136,7 +176,7 @@ export default function Home() {
         )}
 
         {/* Convert button */}
-        {files.length > 0 && !done && (
+        {entries.length > 0 && !done && (
           <button
             onClick={convert}
             disabled={busy}
@@ -145,27 +185,19 @@ export default function Home() {
             {busy ? (
               <span className="flex items-center justify-center gap-2">
                 <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle
-                    className="opacity-25"
-                    cx="12" cy="12" r="10"
-                    stroke="currentColor" strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v8z"
-                  />
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
                 </svg>
                 Converting…
               </span>
             ) : (
-              `Convert ${files.length > 1 ? `${files.length} images` : "image"} to WebP`
+              `Convert ${entries.length > 1 ? `${entries.length} images` : "image"} to WebP`
             )}
           </button>
         )}
 
         {/* Error */}
-        {status === "error" && (
+        {globalStatus === "error" && (
           <div className="bg-red-950/40 border border-red-800 rounded-xl px-4 py-3 text-sm text-red-300">
             {errorMsg || "Something went wrong. Is the Python backend running?"}
           </div>
@@ -186,10 +218,12 @@ export default function Home() {
                 </svg>
               </div>
               <p className="text-zinc-200 font-medium">
-                {files.length === 1 ? "Image converted!" : `${files.length} images converted!`}
+                {successCount === totalCount
+                  ? successCount === 1 ? "Image converted!" : `${successCount} images converted!`
+                  : `${successCount} of ${totalCount} images converted`}
               </p>
               <p className="text-zinc-500 text-sm">
-                {files.length === 1
+                {successCount === 1
                   ? "Your .webp file is ready."
                   : "All files packed into a .zip archive."}
               </p>
@@ -200,8 +234,8 @@ export default function Home() {
               className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-400 active:bg-green-600 font-semibold text-sm text-zinc-950 transition-colors"
             >
               Download{" "}
-              {files.length === 1
-                ? files[0].name.replace(/\.[^.]+$/, ".webp")
+              {successCount === 1
+                ? entries.find((e) => e.status === "done")?.file.name.replace(/\.[^.]+$/, ".webp") ?? "image.webp"
                 : "converted.zip"}
             </button>
 
