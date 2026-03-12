@@ -2,20 +2,6 @@
   "hosting": {
     "site": "img2webp-longcelot",
     "public": "frontend/out",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "function": "api",
-        "region": "us-central1"
-      }
-    ]
-  },
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "default",
-      "ignore": ["venv", ".git", "**/*.pyc", "**/__pycache__"]
-    }
-  ]
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
+  }
 }

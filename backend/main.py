@@ -12,14 +12,16 @@ from PIL import Image
 
 app = FastAPI()
 
-# Allow CORS only in dev (when the Next.js dev server runs separately)
-if os.getenv("DEV"):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# Allow CORS from the frontend origin.
+# Set ALLOWED_ORIGIN in production (e.g. https://img2webp-longcelot.web.app).
+# Defaults to localhost:3000 for local dev.
+_allowed_origin = os.getenv("ALLOWED_ORIGIN", "http://localhost:3000")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[_allowed_origin],
+    allow_methods=["POST"],
+    allow_headers=["*"],
+)
 
 
 def safe_name(filename: str) -> str:

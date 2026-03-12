@@ -6,9 +6,9 @@ Privacy-first image-to-WebP converter. Users drag-drop images, choose quality/re
 
 **Stack:**
 - **Frontend:** Next.js 16 (App Router) + React 19 + Tailwind CSS 4 + TypeScript (strict)
-- **Backend (dev):** Python FastAPI — serves `/api/convert`, proxied from Next.js on `localhost:8000`
-- **Backend (prod):** Firebase Cloud Functions (Flask) — handles `/api/**` rewrites
-- **Hosting:** Firebase Hosting with static export from Next.js (`frontend/out/`)
+- **Backend:** Python FastAPI — hosted on **Render** (free tier), serves `/api/convert`
+- **Frontend hosting:** Firebase Hosting — static export from Next.js (`frontend/out/`)
+- **CI/CD:** GitHub Actions — builds frontend + deploys to Firebase on push to `main`
 
 ---
 
@@ -16,31 +16,48 @@ Privacy-first image-to-WebP converter. Users drag-drop images, choose quality/re
 
 ```
 img2webp/
-├── .husky/                    # Git hooks (pre-commit)
-├── .github/workflows/         # CI/CD — deploys to Firebase on push to main
-├── backend/                   # FastAPI dev server
+├── .husky/                    # Git hooks (pre-commit via husky + lint-staged)
+├── .github/workflows/
+│   └── deploy.yml             # CI/CD — builds frontend + deploys to Firebase Hosting
+├── backend/                   # FastAPI server (dev + Render production)
 │   ├── main.py                # POST /api/convert endpoint
 │   └── requirements.txt
 ├── frontend/                  # Next.js app
 │   ├── app/
 │   │   ├── layout.tsx         # Root layout (Geist fonts)
-│   │   ├── page.tsx           # Main page — state, fetch, download logic
+│   │   ├── page.tsx           # Main page — state, queue convert loop, download logic
 │   │   ├── globals.css        # Tailwind + theme variables
+│   │   ├── types/
+│   │   │   └── convert.ts     # ConvertOptions, FileStatus, FileEntry
 │   │   └── components/
 │   │       ├── DropZone.tsx   # Drag-and-drop file input
-│   │       ├── FileList.tsx   # File list with previews and remove
-│   │       └── OptionsPanel.tsx  # Quality/resize controls, exports ConvertOptions
+│   │       ├── FileList.tsx   # File list with per-file status indicators and previews
+│   │       └── OptionsPanel.tsx  # Quality/resize controls
 │   ├── eslint.config.mjs
 │   ├── next.config.ts         # Static export + dev proxy to :8000
 │   ├── tsconfig.json          # strict mode, path alias @/*
-│   └── package.json
-├── functions/                 # Firebase Cloud Functions
-│   ├── main.py                # Flask HTTP handler — same logic as backend/main.py
-│   └── requirements.txt
-├── firebase.json              # Hosting + functions config
+│   └── package.json           # husky prepare, lint-staged config
+├── render.yaml                # Render deploy config for the FastAPI backend
+├── firebase.json              # Firebase Hosting config (no functions)
 ├── start.sh                   # Dev: starts both FastAPI + Next.js
 └── convert.py                 # Legacy standalone CLI converter (unused)
 ```
+
+---
+
+## Architecture
+
+```
+Browser
+  └── Firebase Hosting (static Next.js export)
+        └── fetch NEXT_PUBLIC_API_URL/api/convert
+              └── Render (FastAPI)
+                    └── returns .webp bytes
+```
+
+- In **dev**: Next.js dev server proxies `/api/*` → `http://localhost:8000` (no env var needed).
+- In **production**: `NEXT_PUBLIC_API_URL` is baked into the static build at CI time, pointing to the Render service URL (set as `RENDER_BACKEND_URL` GitHub secret).
+- CORS on the backend is controlled by the `ALLOWED_ORIGIN` env var (set to the Firebase Hosting URL on Render).
 
 ---
 
@@ -57,7 +74,17 @@ cd frontend && pnpm dev
 cd backend && uvicorn main:app --reload
 ```
 
-API proxy: Next.js rewrites `/api/*` → `http://localhost:8000/api/*` in dev mode.
+API proxy: Next.js rewrites `/api/*` → `http://localhost:8000/api/*` in dev mode only.
+No `NEXT_PUBLIC_API_URL` is needed locally — the empty string falls back to the relative proxy.
+
+---
+
+## Environment Variables
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | GitHub secret `RENDER_BACKEND_URL`, injected at build | Points the static frontend to the Render backend (e.g. `https://img2webp-backend.onrender.com`) |
+| `ALLOWED_ORIGIN` | Render env var | CORS origin the backend accepts (e.g. `https://img2webp-longcelot.web.app`) |
 
 ---
 
@@ -67,9 +94,9 @@ Each file has a single responsibility. Follow this structure strictly:
 
 | What | Where |
 |------|-------|
-| Page-level state, fetch calls, download logic | `app/page.tsx` |
+| Page-level state, queue convert loop, download logic | `app/page.tsx` |
 | Reusable UI components | `app/components/<ComponentName>.tsx` |
-| Shared TypeScript types/interfaces | `app/types/` (create if needed) |
+| Shared TypeScript types/interfaces | `app/types/` |
 | Global styles | `app/globals.css` |
 | Next.js route config, rewrites | `next.config.ts` |
 | TypeScript config | `tsconfig.json` |
@@ -103,8 +130,10 @@ Each file has a single responsibility. Follow this structure strictly:
 - Prefer `readonly` on props interfaces where mutation is not intended
 - Mark optional props explicitly with `?`
 
-**Current shared types to move to `app/types/` if they grow:**
-- `ConvertOptions` (currently in `OptionsPanel.tsx`) — move to `app/types/convert.ts` when referenced from `page.tsx` or other components
+**Shared types live in `app/types/convert.ts`:**
+- `ConvertOptions` — quality, resize options passed from `OptionsPanel` → `page.tsx`
+- `FileStatus` — `"pending" | "converting" | "done" | "error"` per-file state
+- `FileEntry` — `{ file: File; status: FileStatus; result?: Blob; error?: string }`
 
 ---
 
@@ -123,6 +152,7 @@ Each file has a single responsibility. Follow this structure strictly:
 - Avoid prop drilling more than 2 levels — consider co-locating state or extracting a context
 - Use `useCallback` for callbacks passed as props to avoid unnecessary re-renders
 - Image elements must use Next.js `<Image>` component, not `<img>`
+- Object URL previews (`URL.createObjectURL`) must use the `useEffect` + `setState` pattern with cleanup (`URL.revokeObjectURL`). Suppress `react-hooks/set-state-in-effect` with `// eslint-disable-next-line` for this specific case. Do NOT use lazy `useState` init for object URLs — React StrictMode will revoke the URL before it can be used.
 
 ### Styling
 - Tailwind utility classes only — no inline `style` props except for dynamic values (e.g., `style={{ width: \`${pct}%\` }}`)
@@ -178,13 +208,23 @@ Before opening a PR or considering a feature complete:
 
 ## Deployment
 
+### Frontend (Firebase Hosting) — automatic on push to `main`
 ```bash
-# Deploy to Firebase (runs automatically on push to main via GitHub Actions)
-firebase deploy --only hosting:img2webp-longcelot,functions
-
-# Build frontend static export manually
 cd frontend && pnpm build    # outputs to frontend/out/
+firebase deploy --only hosting:img2webp-longcelot
 ```
+
+### Backend (Render) — automatic on push to `main` if connected to repo
+See `render.yaml` at the repo root. Render builds and runs `backend/` using:
+- Build: `pip install -r requirements.txt`
+- Start: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+
+**GitHub Secrets required:**
+
+| Secret | Value |
+|---|---|
+| `FIREBASE_TOKEN` | Firebase CI token (`firebase login:ci`) |
+| `RENDER_BACKEND_URL` | Full Render service URL, e.g. `https://img2webp-backend.onrender.com` |
 
 **Important:** `next.config.ts` sets `output: "export"` and disables image optimization for Firebase Hosting compatibility. Do not remove these settings.
 
@@ -192,7 +232,8 @@ cd frontend && pnpm build    # outputs to frontend/out/
 
 ## Backend Notes (Python)
 
-- Image conversion logic lives in both `backend/main.py` (FastAPI) and `functions/main.py` (Flask). Keep them in sync when modifying conversion logic.
+- Image conversion logic lives in `backend/main.py`. This is the single source of truth — the `functions/` directory is no longer used.
 - Pillow is the only image processing dependency — do not add alternatives.
-- The `/api/convert` endpoint accepts `multipart/form-data` with files + `quality`, `do_resize`, `max_width`, `max_height` fields.
-- Response is always a single `.webp` file or a `.zip` archive when multiple files are submitted.
+- The `/api/convert` endpoint accepts `multipart/form-data` with `files`, `quality`, `do_resize`, `max_width`, `max_height` fields.
+- Response is a single `.webp` blob per request. The frontend sends one file per request and handles multi-file packaging client-side with `jszip`.
+- CORS is always enabled; the allowed origin is set via the `ALLOWED_ORIGIN` env var (default: `http://localhost:3000`).
