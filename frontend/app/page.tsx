@@ -131,18 +131,8 @@ export default function Home() {
   const totalCount = entries.length;
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-white flex items-start justify-center pt-16 pb-16 px-4">
+    <main className="flex justify-center px-4 pt-10 pb-16">
       <div className="w-full max-w-xl flex flex-col gap-6">
-        {/* Header */}
-        <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight">
-            img<span className="text-blue-400">2</span>webp
-          </h1>
-          <p className="text-zinc-500 text-sm mt-1">
-            Convert images to WebP — nothing is stored on the server.
-          </p>
-        </div>
-
         {/* Drop zone */}
         <DropZone onFiles={addFiles} disabled={busy || done} />
 
