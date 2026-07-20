@@ -36,8 +36,6 @@ jobs:
           NEXT_PUBLIC_API_URL: ${{ secrets.RENDER_BACKEND_URL }}
 
       - name: Deploy hosting to Firebase
-        run: |
-          pnpm add -g firebase-tools
-          firebase deploy --only hosting:img2webp-longcelot
+        run: pnpm dlx firebase-tools deploy --only hosting:img2webp-longcelot
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
