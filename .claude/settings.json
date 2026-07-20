@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./node_modules/.bin/eslint app/page.tsx app/types/convert.ts --max-warnings 0)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -m pip show fastapi)",
+      "Bash(pnpm help *)",
+      "Bash(pnpm approve-builds *)"
+    ]
+  }
+}
