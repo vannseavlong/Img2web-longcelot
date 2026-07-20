@@ -48,6 +48,11 @@ def process_image(data: bytes, quality: int, do_resize: bool, max_w: int, max_h:
     return buf.getvalue()
 
 
+@app.get("/api/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.post("/api/convert")
 async def convert_images(
     files: List[UploadFile] = File(...),

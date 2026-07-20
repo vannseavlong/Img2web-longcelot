@@ -1,13 +1,15 @@
 "use client";
 
 import JSZip from "jszip";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import DropZone from "./components/DropZone";
 import FileList from "./components/FileList";
 import OptionsPanel from "./components/OptionsPanel";
-import type { ConvertOptions, FileEntry, FileStatus } from "./types/convert";
+import type { BackendStatus, ConvertOptions, FileEntry, FileStatus } from "./types/convert";
 
 type GlobalStatus = "idle" | "converting" | "done" | "error";
+
+const HEALTH_CHECK_RETRY_MS = 4000;
 
 export default function Home() {
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -19,7 +21,38 @@ export default function Home() {
   });
   const [globalStatus, setGlobalStatus] = useState<GlobalStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
   const downloadRef = useRef<{ url: string; name: string } | null>(null);
+
+  useEffect(() => {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout>;
+
+    const checkHealth = async (): Promise<void> => {
+      try {
+        const res = await fetch(`${apiBase}/api/health`);
+        if (cancelled) return;
+        if (res.ok) {
+          setBackendStatus("online");
+          return;
+        }
+        setBackendStatus("offline");
+      } catch {
+        if (!cancelled) setBackendStatus("offline");
+      }
+      if (!cancelled) {
+        retryTimer = setTimeout(checkHealth, HEALTH_CHECK_RETRY_MS);
+      }
+    };
+
+    checkHealth();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
+    };
+  }, []);
 
   const addFiles = useCallback((incoming: File[]) => {
     setEntries((prev) => {
@@ -130,11 +163,22 @@ export default function Home() {
   const successCount = entries.filter((e) => e.status === "done").length;
   const totalCount = entries.length;
 
+  const backendReady = backendStatus === "online";
+
   return (
     <main className="flex justify-center px-4 pt-10 pb-16">
       <div className="w-full max-w-xl flex flex-col gap-6">
+        {/* Backend reachability */}
+        {!backendReady && (
+          <div className="bg-yellow-950/40 border border-yellow-800 rounded-xl px-4 py-3 text-sm text-yellow-300">
+            {backendStatus === "checking"
+              ? "Connecting to the server…"
+              : "Server is waking up — this can take up to a minute on the free tier…"}
+          </div>
+        )}
+
         {/* Drop zone */}
-        <DropZone onFiles={addFiles} disabled={busy || done} />
+        <DropZone onFiles={addFiles} disabled={busy || done || !backendReady} />
 
         {/* File list */}
         {entries.length > 0 && (
@@ -169,7 +213,7 @@ export default function Home() {
         {entries.length > 0 && !done && (
           <button
             onClick={convert}
-            disabled={busy}
+            disabled={busy || !backendReady}
             className="w-full py-3 rounded-2xl bg-blue-500 hover:bg-blue-400 active:bg-blue-600 disabled:bg-blue-900 disabled:text-blue-500 font-semibold text-sm transition-colors"
           >
             {busy ? (

@@ -7,6 +7,8 @@ export interface ConvertOptions {
 
 export type FileStatus = "pending" | "converting" | "done" | "error";
 
+export type BackendStatus = "checking" | "online" | "offline";
+
 export interface FileEntry {
   file: File;
   status: FileStatus;
