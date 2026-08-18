@@ -5,20 +5,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import DropZone from "./components/DropZone";
 import FileList from "./components/FileList";
 import OptionsPanel from "./components/OptionsPanel";
-import type { BackendStatus, ConvertOptions, FileEntry, FileStatus } from "./types/convert";
+import type { BackendStatus, ConvertOptions, FileEntry, FileStatus, ResizeOptions } from "./types/convert";
 
 type GlobalStatus = "idle" | "converting" | "done" | "error";
 
 const HEALTH_CHECK_RETRY_MS = 4000;
 
+const baseName = (filename: string): string => filename.replace(/\.[^./]+$/, "");
+
 export default function Home() {
   const [entries, setEntries] = useState<FileEntry[]>([]);
-  const [options, setOptions] = useState<ConvertOptions>({
-    quality: 80,
-    doResize: false,
-    maxWidth: 1920,
-    maxHeight: 1080,
-  });
+  const [options, setOptions] = useState<ConvertOptions>({ quality: 80 });
   const [globalStatus, setGlobalStatus] = useState<GlobalStatus>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("checking");
@@ -59,7 +56,12 @@ export default function Home() {
       const names = new Set(prev.map((e) => e.file.name));
       const newEntries: FileEntry[] = incoming
         .filter((f) => !names.has(f.name))
-        .map((f) => ({ file: f, status: "pending" }));
+        .map((f) => ({
+          file: f,
+          status: "pending" as FileStatus,
+          outputName: baseName(f.name),
+          resize: { enabled: false, maxWidth: 1920, maxHeight: 1080 },
+        }));
       return [...prev, ...newEntries];
     });
     setGlobalStatus("idle");
@@ -71,6 +73,18 @@ export default function Home() {
 
   const removeFile = useCallback((index: number) => {
     setEntries((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const renameFile = useCallback((index: number, name: string) => {
+    setEntries((prev) =>
+      prev.map((e, i) => (i === index ? { ...e, outputName: name } : e)),
+    );
+  }, []);
+
+  const setFileResize = useCallback((index: number, resize: ResizeOptions) => {
+    setEntries((prev) =>
+      prev.map((e, i) => (i === index ? { ...e, resize } : e)),
+    );
   }, []);
 
   const updateEntryStatus = (
@@ -99,9 +113,9 @@ export default function Home() {
       const formData = new FormData();
       formData.append("files", entry.file);
       formData.append("quality", options.quality.toString());
-      formData.append("do_resize", options.doResize ? "true" : "false");
-      formData.append("max_width", options.maxWidth.toString());
-      formData.append("max_height", options.maxHeight.toString());
+      formData.append("do_resize", entry.resize.enabled ? "true" : "false");
+      formData.append("max_width", entry.resize.maxWidth.toString());
+      formData.append("max_height", entry.resize.maxHeight.toString());
 
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "";
@@ -109,7 +123,7 @@ export default function Home() {
         if (!res.ok) throw new Error(`Server error ${res.status}`);
 
         const blob = await res.blob();
-        const webpName = entry.file.name.replace(/\.[^.]+$/, ".webp");
+        const webpName = `${entry.outputName.trim() || "image"}.webp`;
         results.push({ name: webpName, blob });
         updateEntryStatus(i, { status: "done", result: blob });
       } catch (e) {
@@ -129,8 +143,16 @@ export default function Home() {
       downloadRef.current = { url, name: results[0].name };
     } else {
       const zip = new JSZip();
+      const usedNames = new Set<string>();
       for (const { name, blob } of results) {
-        zip.file(name, blob);
+        let finalName = name;
+        let suffix = 1;
+        while (usedNames.has(finalName)) {
+          finalName = name.replace(/\.webp$/, `-${suffix}.webp`);
+          suffix += 1;
+        }
+        usedNames.add(finalName);
+        zip.file(finalName, blob);
       }
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const url = URL.createObjectURL(zipBlob);
@@ -196,7 +218,13 @@ export default function Home() {
                 </button>
               )}
             </div>
-            <FileList entries={entries} onRemove={removeFile} disabled={busy || done} />
+            <FileList
+              entries={entries}
+              onRemove={removeFile}
+              onRename={renameFile}
+              onResizeChange={setFileResize}
+              disabled={busy || done}
+            />
           </div>
         )}
 
@@ -267,10 +295,7 @@ export default function Home() {
               onClick={download}
               className="w-full py-3 rounded-2xl bg-green-500 hover:bg-green-400 active:bg-green-600 font-semibold text-sm text-zinc-950 transition-colors"
             >
-              Download{" "}
-              {successCount === 1
-                ? entries.find((e) => e.status === "done")?.file.name.replace(/\.[^.]+$/, ".webp") ?? "image.webp"
-                : "converted.zip"}
+              Download {downloadRef.current?.name ?? (successCount === 1 ? "image.webp" : "converted.zip")}
             </button>
 
             <button
