@@ -26,7 +26,9 @@ app.add_middleware(
 
 def safe_name(filename: str) -> str:
     base = filename.rsplit(".", 1)[0]
-    return re.sub(r"\s+", "_", base) + ".webp"
+    base = re.sub(r"\s+", "_", base)
+    base = re.sub(r"[^A-Za-z0-9._-]", "", base)
+    return (base or "image") + ".webp"
 
 
 def process_image(data: bytes, quality: int, do_resize: bool, max_w: int, max_h: int) -> bytes:
