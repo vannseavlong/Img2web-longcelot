@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
 
   // Proxy /api/* to the local Python backend in dev only.
   ...(isDev && {
+    // The dev proxy truncates request bodies at 10MB by default; allow large images.
+    experimental: { proxyClientMaxBodySize: "100mb" },
     async rewrites() {
       return [
         {
